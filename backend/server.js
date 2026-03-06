@@ -1,7 +1,9 @@
+require.config("dotenv");
 const express = require("express");
 
-// files
-const { PORT } = require("./example.env");
+
+// files 
+
 // exporting Databse file
 const { connectDB } = require("./src/database/db");
 
@@ -14,6 +16,7 @@ app.get('/', (req, res) => {
     res.send("Hello World....");
 })
 
+const PORT = process.env.PORT;
 app.listen(PORT, () => {
     console.log("Serevr is running on PORT:", PORT)
 });
