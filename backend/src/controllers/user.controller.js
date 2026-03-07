@@ -206,37 +206,65 @@ const resetPassword = async (req, res) => {
     }
 };
 
-const refreshToken = async (req, res) => {
+export const refreshToken = async (req, res) => {
+
     const token = req.cookies.refreshToken;
+  
     if (!token) {
-        return res.status(401).json({ message: "No refresh token" });
+      return res.status(401).json({ message: "No refresh token" });
     }
-
+  
     try {
-        const decoded = jwt.verify(token, JWT_REFRESH_SECRET);
-
-        const user = await User.findById(decoded.id);
-        if (!user) {
-            return res.status(401).json({ message: "User not found for refresh token" });
-        }
-
-        const tokenExists = (user.refreshTokens || []).some(
-            t => t.token === token
-        );
-        if (!tokenExists) {
-            return res.status(401).json({
-                message: "Refresh token not recognized"
-            });
-        }
-
-        const accessToken = generateAccessToken(user);
-        res.json({ accessToken });
-    } catch (error) {
+  
+      const decoded = jwt.verify(
+        token,
+        process.env.JWT_REFRESH_SECRET
+      );
+  
+      const user = await User.findById(decoded.id);
+  
+      if (!user) {
+        return res.status(401).json({ message: "User not found" });
+      }
+  
+      const tokenIndex = user.refreshTokens.findIndex(
+        (t) => t.token === token
+      );
+  
+      if (tokenIndex === -1) {
         return res.status(401).json({
-            message: "Invalid refresh token"
+          message: "Refresh token not recognized"
         });
+      }
+  
+      user.refreshTokens.splice(tokenIndex, 1);
+  
+      const newAccessToken = generateAccessToken(user);
+      const newRefreshToken = generateRefreshToken(user);
+  
+      user.refreshTokens.push({ token: newRefreshToken });
+  
+      await user.save();
+  
+      res.cookie("refreshToken", newRefreshToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "strict"
+      });
+  
+      res.json({
+        accessToken: newAccessToken
+      });
+  
+    } catch (error) {
+  
+      return res.status(401).json({
+        message: "Invalid refresh token"
+      });
+  
     }
-};
+  
+  };
 
 const logout = async (req, res) => {
     const token = req.cookies.refreshToken;
