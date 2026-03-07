@@ -12,41 +12,40 @@ const Frontend_url = process.env.Frontend_url || "http://localhost:3000";
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
 
-// Helper: hash a token string with sha256
 function hashToken(token) {
-    return crypto.createHash('sha256').update(token).digest('hex');
+    if (typeof token !== "string") throw new Error("Token must be a string");
+    return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 const register = async (req, res) => {
     try {
         const { error } = registerSchema.validate(req.body);
-
         if (error) {
             return res.status(400).json({ message: error.details[0].message });
         }
 
         const { email, password } = req.body;
-        const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
+        const userEmail = email.toLowerCase().trim();
+        const existingUser = await User.findOne({ email: userEmail });
 
         if (existingUser) {
             return res.status(400).json({ message: "User already exists" });
         }
 
-        // raw token for link, hash for db
         const verificationToken = crypto.randomBytes(32).toString("hex");
         const verificationTokenHash = hashToken(verificationToken);
 
         const user = await User.create({
-            email: email.toLowerCase().trim(),
+            email: userEmail,
             password,
             verificationToken: verificationTokenHash,
-            verificationTokenExpires: Date.now() + 3600000
+            verificationTokenExpires: Date.now() + 60 * 60 * 1000
         });
 
         const verifyUrl = `${Frontend_url}/api/auth/verify-email?token=${verificationToken}`;
 
         await sendEmail(
-            email,
+            userEmail,
             "Verify your account",
             `<a href="${verifyUrl}">Verify Email</a>`
         );
@@ -55,14 +54,14 @@ const register = async (req, res) => {
             message: "User registered. Check your email for verification."
         });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        console.error(error);
+        res.status(500).json({ message: "Internal server error" });
     }
 };
 
 const verifyEmail = async (req, res) => {
     try {
         const { token } = req.query;
-
         if (!token || typeof token !== "string") {
             return res.status(400).json({ message: "Token is required" });
         }
@@ -86,20 +85,19 @@ const verifyEmail = async (req, res) => {
 
         res.json({ message: "Email verified successfully." });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        console.error(error);
+        res.status(500).json({ message: "Internal server error" });
     }
 };
 
 const login = async (req, res) => {
     try {
         const { error } = loginSchema.validate(req.body);
-
         if (error) {
             return res.status(400).json({ message: error.details[0].message });
         }
 
         const { email, password } = req.body;
-
         const user = await User.findOne({ email: email.toLowerCase().trim() });
 
         if (!user) {
@@ -111,7 +109,6 @@ const login = async (req, res) => {
         }
 
         const isMatch = await user.comparePassword(password);
-
         if (!isMatch) {
             return res.status(400).json({ message: "Invalid credentials" });
         }
@@ -119,55 +116,60 @@ const login = async (req, res) => {
         const accessToken = generateAccessToken(user);
         const refreshToken = generateRefreshToken(user);
 
+        user.refreshTokens = (user.refreshTokens || []).filter(
+            t => !!t.token
+        );
+
+        user.refreshTokens.push({ token: refreshToken });
+        await user.save();
+
         res.cookie("refreshToken", refreshToken, {
             httpOnly: true,
-            secure: true,
+            secure: process.env.NODE_ENV === "production",
             sameSite: "strict",
             maxAge: 7 * 24 * 60 * 60 * 1000
         });
 
-        res.json({
-            accessToken
-        });
+        res.json({ accessToken });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        console.error(error);
+        res.status(500).json({ message: "Internal server error" });
     }
 };
 
 const forgotPassword = async (req, res) => {
     try {
         const { email } = req.body;
-
         if (!email) {
             return res.status(400).json({ message: "Email is required" });
         }
 
-        const user = await User.findOne({ email: email.toLowerCase().trim() });
+        const userEmail = email.toLowerCase().trim();
+        const user = await User.findOne({ email: userEmail });
 
         if (!user) {
-            return res.status(400).json({ message: "User not found" });
+            return res.json({ message: "Password reset email sent" });
         }
 
-        // raw reset token for user, hash for db
         const resetToken = crypto.randomBytes(32).toString("hex");
         const resetTokenHash = hashToken(resetToken);
 
         user.resetPasswordToken = resetTokenHash;
-        user.resetPasswordExpires = Date.now() + 900000;
+        user.resetPasswordExpires = Date.now() + 15 * 60 * 1000;
 
         await user.save();
 
         const resetUrl = `${Frontend_url}/reset-password?token=${resetToken}`;
-
         await sendEmail(
-            email,
+            userEmail,
             "Reset Password",
             `<a href="${resetUrl}">Reset Password</a><br>If you didn't request a reset, you can ignore this email.`
         );
 
         res.json({ message: "Password reset email sent" });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        console.error(error);
+        res.status(500).json({ message: "Internal server error" });
     }
 };
 
@@ -199,40 +201,66 @@ const resetPassword = async (req, res) => {
 
         res.json({ message: "Password reset successful." });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        console.error(error);
+        res.status(500).json({ message: "Internal server error" });
     }
 };
 
-const refreshToken = (req, res) => {
+const refreshToken = async (req, res) => {
     const token = req.cookies.refreshToken;
-    if(!token) {
-        return res.status(401).json({ message: "No refresh token "});
+    if (!token) {
+        return res.status(401).json({ message: "No refresh token" });
     }
 
     try {
-        const decoded = jwt.verify(
-            token, 
-            JWT_REFRESH_SECRET
-        );
+        const decoded = jwt.verify(token, JWT_REFRESH_SECRET);
 
-        const accessToken = jwt.sign(
-            { id: decoded.id }, 
-            JWT_ACCESS_SECRET, 
-            { expiresIn: "15m" }
+        const user = await User.findById(decoded.id);
+        if (!user) {
+            return res.status(401).json({ message: "User not found for refresh token" });
+        }
+
+        const tokenExists = (user.refreshTokens || []).some(
+            t => t.token === token
         );
+        if (!tokenExists) {
+            return res.status(401).json({
+                message: "Refresh token not recognized"
+            });
+        }
+
+        const accessToken = generateAccessToken(user);
         res.json({ accessToken });
-    }catch (error) {
+    } catch (error) {
         return res.status(401).json({
             message: "Invalid refresh token"
         });
     }
 };
 
-const logout = (req, res) => {
+const logout = async (req, res) => {
+    const token = req.cookies.refreshToken;
+
+    if (token) {
+        try {
+            const decoded = jwt.verify(token, JWT_REFRESH_SECRET);
+
+            const user = await User.findById(decoded.id);
+            if (user) {
+                user.refreshTokens = (user.refreshTokens || []).filter(
+                    t => t.token !== token
+                );
+
+                await user.save();
+            }
+        } catch (error) {
+        }
+    }
+
     res.clearCookie("refreshToken", {
-        httpOnly: true, 
-        secure: true, 
-        sameSite: "Strict"
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict"
     });
 
     res.json({
@@ -245,7 +273,7 @@ module.exports = {
     verifyEmail,
     login,
     forgotPassword,
-    resetPassword, 
-    refreshToken, 
+    resetPassword,
+    refreshToken,
     logout,
 };
