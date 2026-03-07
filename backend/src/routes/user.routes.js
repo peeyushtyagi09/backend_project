@@ -4,7 +4,9 @@ const {
     login, 
     verifyEmail, 
     forgotPassword, 
-    resetPassword
+    resetPassword, 
+    refreshToken, 
+    logout
 } = require("../controllers/user.controller");
 const router = express.Router();
 
@@ -18,5 +20,9 @@ router.get("/verify-email", verifyEmail);
 // Password reset
 router.post("/forgot-password", forgotPassword); 
 router.post("/reset-password", resetPassword);
+
+router.post("/refresh", refreshToken);
+
+router.post("/logout", logout);
 
 module.exports = router;

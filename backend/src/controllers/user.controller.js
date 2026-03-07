@@ -1,5 +1,6 @@
 const User = require("../models/User.model");
 const crypto = require("crypto");
+const jwt = require("jsonwebtoken");
 
 const { sendEmail } = require("../utils/sendEmail");
 const { generateAccessToken, generateRefreshToken } = require("../utils/generateTokens");
@@ -7,6 +8,10 @@ const { generateAccessToken, generateRefreshToken } = require("../utils/generate
 const { registerSchema, loginSchema } = require("../validation/User.validation");
 
 const Frontend_url = process.env.Frontend_url || "http://localhost:3000";
+
+
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
 
 const register = async (req, res) => {
     try {
@@ -186,10 +191,49 @@ const resetPassword = async (req, res) => {
     }
 };
 
+const refreshToken = (req, res) => {
+    const token = req.cookies.refreshToken;
+    if(!token) {
+        return res.status(401).json({ message: "No refresh token "});
+    }
+
+    try {
+        const decoded = jwt.verify(
+            token, 
+            JWT_REFRESH_SECRET
+        );
+
+        const accessToken = jwt.sign(
+            { id: decoded.id }, 
+            JWT_ACCESS_SECRET, 
+            { expiresIn: "15m" }
+        );
+        res.json({ accessToken });
+    }catch (error) {
+        return res.status(401).json({
+            message: "Invalid refresh token"
+        });
+    }
+};
+
+const logout = (req, res) => {
+    res.clearCookie("refreshToken", {
+        httpOnly: true, 
+        secure: true, 
+        sameSite: "Strict"
+    });
+
+    res.json({
+        message: "Logged out successfully"
+    });
+};
+
 module.exports = {
     register,
     verifyEmail,
     login,
     forgotPassword,
-    resetPassword
+    resetPassword, 
+    refreshToken, 
+    logout,
 };
