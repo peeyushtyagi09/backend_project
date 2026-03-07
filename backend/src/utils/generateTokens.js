@@ -1,4 +1,4 @@
-import jwt from "jsonwebtoken";
+const jwt = require("jsonwebtoken");
 
 // Environment variable validation
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
@@ -8,8 +8,7 @@ if (!JWT_ACCESS_SECRET || !JWT_REFRESH_SECRET) {
     throw new Error("JWT secrets are not defined in environment variables.");
 }
 
-
-export const generateAccessToken = (user) => {
+const generateAccessToken = (user) => {
     if (!user || !user._id || !user.role) {
         throw new Error("User object with _id and role is required for generating access token.");
     }
@@ -23,8 +22,7 @@ export const generateAccessToken = (user) => {
     );
 };
 
-
-export const generateRefreshToken = (user) => {
+const generateRefreshToken = (user) => {
     if (!user || !user._id) {
         throw new Error("User object with _id is required for generating refresh token.");
     }
@@ -35,4 +33,9 @@ export const generateRefreshToken = (user) => {
         JWT_REFRESH_SECRET,
         { expiresIn: "7d" }
     );
+};
+
+module.exports = {
+    generateAccessToken,
+    generateRefreshToken,
 };

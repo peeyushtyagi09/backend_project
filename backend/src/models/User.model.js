@@ -2,8 +2,7 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 
 
-// variables
-const SaltValue = process.env.SaltValue;
+const SaltValue = process.env.SaltValue ? Number(process.env.SaltValue) : 10;
 
 const UserSchema = new mongoose.Schema(
     {
@@ -22,7 +21,7 @@ const UserSchema = new mongoose.Schema(
             type: String,
             required: [true, "Password is required"],
             minlength: [8, "Password must be at least 8 characters long"],
-            select: false,
+            select: true,
             trim: true,
         },
         isVerified: {
@@ -56,20 +55,21 @@ const UserSchema = new mongoose.Schema(
     }
 );
 
-UserSchema.pre("save", async function (next) {
+UserSchema.pre("save", async function () {
     if (!this.isModified("password")) {
-        return next();
+        return;
     }
-    try {
-        const salt = await bcrypt.genSalt(SaltValue);
-        this.password = await bcrypt.hash(this.password, salt);
-        next();
-    } catch (error) {
-        next(error);
-    }
+    const salt = await bcrypt.genSalt(SaltValue);
+    this.password = await bcrypt.hash(this.password, salt);
 });
- 
-UserSchema.methods.comparePassword = async function (enteredPassword) {
+
+UserSchema.methods.comparePassword = async function (enteredPassword) { 
+    if (!this.password) {
+        throw new Error("Password hash not found on user.");
+    }
+    if (!enteredPassword) {
+        throw new Error("No password entered.");
+    }
     return bcrypt.compare(enteredPassword, this.password);
 };
 

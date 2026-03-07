@@ -1,14 +1,14 @@
-import User from "../models/User.js";
-import crypto from "crypto";
+const User = require("../models/User.model");
+const crypto = require("crypto");
 
-import { sendEmail } from "../utils/sendEmail.js";
-import { generateAccessToken, generateRefreshToken } from "../utils/generateTokens.js";
+const { sendEmail } = require("../utils/sendEmail");
+const { generateAccessToken, generateRefreshToken } = require("../utils/generateTokens");
 
-import { registerSchema, loginSchema } from "../validators/authValidator.js";
+const { registerSchema, loginSchema } = require("../validation/User.validation");
 
 const Frontend_url = process.env.Frontend_url || "http://localhost:3000";
 
-export const register = async (req, res) => {
+const register = async (req, res) => {
     try {
         const { error } = registerSchema.validate(req.body);
 
@@ -48,7 +48,7 @@ export const register = async (req, res) => {
     }
 };
 
-export const verifyEmail = async (req, res) => {
+const verifyEmail = async (req, res) => {
     try {
         const { token } = req.query;
 
@@ -77,7 +77,7 @@ export const verifyEmail = async (req, res) => {
     }
 };
 
-export const login = async (req, res) => {
+const login = async (req, res) => {
     try {
         const { error } = loginSchema.validate(req.body);
 
@@ -121,7 +121,7 @@ export const login = async (req, res) => {
     }
 };
 
-export const forgotPassword = async (req, res) => {
+const forgotPassword = async (req, res) => {
     try {
         const { email } = req.body;
 
@@ -147,7 +147,7 @@ export const forgotPassword = async (req, res) => {
         await sendEmail(
             email,
             "Reset Password",
-            `<a href="${resetUrl}">Reset Password</a>`
+            `<a href="${resetUrl}">Reset Password</a><br>If you didn't request a reset, you can ignore this email.`
         );
 
         res.json({ message: "Password reset email sent" });
@@ -156,7 +156,7 @@ export const forgotPassword = async (req, res) => {
     }
 };
 
-export const resetPassword = async (req, res) => {
+const resetPassword = async (req, res) => {
     try {
         const { token } = req.query;
         const { password } = req.body;
@@ -184,4 +184,12 @@ export const resetPassword = async (req, res) => {
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
+};
+
+module.exports = {
+    register,
+    verifyEmail,
+    login,
+    forgotPassword,
+    resetPassword
 };

@@ -1,6 +1,6 @@
-import nodemailer from "nodemailer";
+const nodemailer = require("nodemailer");
 
-export const sendEmail = async (to, subject, html) => {
+const sendEmail = async (to, subject, html) => {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
     throw new Error("Email credentials are not defined in environment variables.");
   }
@@ -12,15 +12,15 @@ export const sendEmail = async (to, subject, html) => {
     service: "gmail",
     auth: {
       user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    }
+      pass: process.env.EMAIL_PASS,
+    },
   });
 
   const mailOptions = {
     from: `"No Reply" <${process.env.EMAIL_USER}>`,
     to,
     subject,
-    html
+    html,
   };
 
   try {
@@ -31,4 +31,8 @@ export const sendEmail = async (to, subject, html) => {
     console.error(`Failed to send email to ${to}:`, error);
     throw new Error("Failed to send email.");
   }
+};
+
+module.exports = {
+  sendEmail,
 };
