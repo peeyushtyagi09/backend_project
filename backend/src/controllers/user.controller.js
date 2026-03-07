@@ -9,9 +9,13 @@ const { registerSchema, loginSchema } = require("../validation/User.validation")
 
 const Frontend_url = process.env.Frontend_url || "http://localhost:3000";
 
-
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
+
+// Helper: hash a token string with sha256
+function hashToken(token) {
+    return crypto.createHash('sha256').update(token).digest('hex');
+}
 
 const register = async (req, res) => {
     try {
@@ -28,12 +32,14 @@ const register = async (req, res) => {
             return res.status(400).json({ message: "User already exists" });
         }
 
+        // raw token for link, hash for db
         const verificationToken = crypto.randomBytes(32).toString("hex");
+        const verificationTokenHash = hashToken(verificationToken);
 
         const user = await User.create({
             email: email.toLowerCase().trim(),
             password,
-            verificationToken,
+            verificationToken: verificationTokenHash,
             verificationTokenExpires: Date.now() + 3600000
         });
 
@@ -61,8 +67,10 @@ const verifyEmail = async (req, res) => {
             return res.status(400).json({ message: "Token is required" });
         }
 
+        const tokenHash = hashToken(token);
+
         const user = await User.findOne({
-            verificationToken: token,
+            verificationToken: tokenHash,
             verificationTokenExpires: { $gt: Date.now() }
         });
 
@@ -140,9 +148,11 @@ const forgotPassword = async (req, res) => {
             return res.status(400).json({ message: "User not found" });
         }
 
+        // raw reset token for user, hash for db
         const resetToken = crypto.randomBytes(32).toString("hex");
+        const resetTokenHash = hashToken(resetToken);
 
-        user.resetPasswordToken = resetToken;
+        user.resetPasswordToken = resetTokenHash;
         user.resetPasswordExpires = Date.now() + 900000;
 
         await user.save();
@@ -170,8 +180,10 @@ const resetPassword = async (req, res) => {
             return res.status(400).json({ message: "Token and new password are required." });
         }
 
+        const tokenHash = hashToken(token);
+
         const user = await User.findOne({
-            resetPasswordToken: token,
+            resetPasswordToken: tokenHash,
             resetPasswordExpires: { $gt: Date.now() }
         });
 
