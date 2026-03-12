@@ -99,18 +99,13 @@ UserSchema.post("save", function(error, doc, next) {
     }
 });
 
-// Hash the password only if it was modified
-UserSchema.pre("save", async function (next) {
+// Hash the password only if it was modified (use function with no "next" argument for mongoose 7+ support)
+UserSchema.pre("save", async function () {
     if (!this.isModified("password")) {
-        return next();
+        return;
     }
-    try {
-        const salt = await bcrypt.genSalt(SALT_ROUNDS);
-        this.password = await bcrypt.hash(this.password, salt);
-        next();
-    } catch (err) {
-        next(err);
-    }
+    const salt = await bcrypt.genSalt(SALT_ROUNDS);
+    this.password = await bcrypt.hash(this.password, salt);
 });
 
 // Compare entered password to the hashed password
