@@ -7,7 +7,7 @@ const authLimiter = rateLimit({
         message: "Too many requests, try again later"
     },
     standardHeaders: true, 
-    lagacyHeaders: false
+    legacyHeaders: false
 });
 
 module.exports = {

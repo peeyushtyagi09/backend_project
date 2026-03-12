@@ -1,10 +1,11 @@
 const User = require("../models/User.model");
+const Tenant = require("../models/Tenant.model");
+
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 
 const { sendEmail } = require("../utils/sendEmail");
 const { generateAccessToken, generateRefreshToken } = require("../utils/generateTokens");
-
 const { registerSchema, loginSchema } = require("../validation/User.validation");
 
 const Frontend_url = process.env.Frontend_url || "http://localhost:3000";
@@ -19,31 +20,53 @@ function hashToken(token) {
 
 const register = async (req, res) => {
     try {
-        const { error } = registerSchema.validate(req.body);
-        if (error) {
-            return res.status(400).json({ message: error.details[0].message });
-        }
+        const { error: registerError } = registerSchema.validate(req.body);
+        if (registerError) return res.status(400).json({ message: registerError.details[0].message });
 
-        const { email, password } = req.body;
+        const { name, email, password, companyName, description, planType } = req.body;
+
         const userEmail = email.toLowerCase().trim();
         const existingUser = await User.findOne({ email: userEmail });
-
-        if (existingUser) {
+        if (existingUser)
             return res.status(400).json({ message: "User already exists" });
+
+        if (!companyName || typeof companyName !== "string" || !companyName.trim()) {
+            return res.status(400).json({ message: "Company name is required" });
+        }
+        if (planType && !["free", "pro", "enterprise"].includes(planType)) {
+            return res.status(400).json({ message: "Plan type must be one of [free, pro, enterprise]" });
         }
 
         const verificationToken = crypto.randomBytes(32).toString("hex");
         const verificationTokenHash = hashToken(verificationToken);
 
-        const user = await User.create({
-            email: userEmail,
-            password,
-            verificationToken: verificationTokenHash,
-            verificationTokenExpires: Date.now() + 60 * 60 * 1000
+        const tenant = new Tenant({
+            companyName: companyName && typeof companyName === "string" ? companyName.trim() : "",
+            description: typeof description === "string" ? description.trim() : "",
+            planType: planType || "free",
         });
+        await tenant.save();
+
+        let user;
+        try {
+            user = await User.create({
+                name: name.trim(),
+                email: userEmail,
+                password,
+                tenantId: tenant._id,
+                role: "admin",
+                verificationToken: verificationTokenHash,
+                verificationTokenExpires: Date.now() + 60 * 60 * 1000,
+            });
+        } catch (userError) {
+            await Tenant.findByIdAndDelete(tenant._id);
+            throw userError;
+        }
+
+        tenant.ownerUser = user._id;
+        await tenant.save();
 
         const verifyUrl = `${Frontend_url}/api/auth/verify-email?token=${verificationToken}`;
-
         await sendEmail(
             userEmail,
             "Verify your account",
@@ -54,7 +77,7 @@ const register = async (req, res) => {
             message: "User registered. Check your email for verification."
         });
     } catch (error) {
-        console.error(error);
+        console.error("Register error:", error);
         res.status(500).json({ message: "Internal server error" });
     }
 };
@@ -85,7 +108,7 @@ const verifyEmail = async (req, res) => {
 
         res.json({ message: "Email verified successfully." });
     } catch (error) {
-        console.error(error);
+        console.error("Verify email error:", error);
         res.status(500).json({ message: "Internal server error" });
     }
 };
@@ -93,19 +116,17 @@ const verifyEmail = async (req, res) => {
 const login = async (req, res) => {
     try {
         const { error } = loginSchema.validate(req.body);
-        if (error) {
-            return res.status(400).json({ message: error.details[0].message });
-        }
+        if (error) return res.status(400).json({ message: error.details[0].message });
 
         const { email, password } = req.body;
-        const user = await User.findOne({ email: email.toLowerCase().trim() });
+        const user = await User.findOne({ email: email.toLowerCase().trim() }).select("+password +refreshTokens");
 
         if (!user) {
             return res.status(400).json({ message: "Invalid credentials" });
         }
 
         if (!user.isVerified) {
-            return res.status(400).json({ message: "Verify email first" });
+            return res.status(400).json({ message: "Please verify your email before logging in." });
         }
 
         const isMatch = await user.comparePassword(password);
@@ -114,16 +135,18 @@ const login = async (req, res) => {
         }
 
         const accessToken = generateAccessToken(user);
-        const refreshToken = generateRefreshToken(user);
+        const refreshTokenValue = generateRefreshToken(user);
 
-        user.refreshTokens = (user.refreshTokens || []).filter(
-            t => !!t.token
-        );
+        user.refreshTokens = (user.refreshTokens || []).filter(t => t && t.token);
 
-        user.refreshTokens.push({ token: refreshToken });
+        if (user.refreshTokens.length >= 10) {
+            user.refreshTokens = user.refreshTokens.slice(-9);
+        }
+
+        user.refreshTokens.push({ token: refreshTokenValue });
         await user.save();
 
-        res.cookie("refreshToken", refreshToken, {
+        res.cookie("refreshToken", refreshTokenValue, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
             sameSite: "strict",
@@ -132,7 +155,7 @@ const login = async (req, res) => {
 
         res.json({ accessToken });
     } catch (error) {
-        console.error(error);
+        console.error("Login error:", error);
         res.status(500).json({ message: "Internal server error" });
     }
 };
@@ -168,7 +191,7 @@ const forgotPassword = async (req, res) => {
 
         res.json({ message: "Password reset email sent" });
     } catch (error) {
-        console.error(error);
+        console.error("Forgot password error:", error);
         res.status(500).json({ message: "Internal server error" });
     }
 };
@@ -201,70 +224,63 @@ const resetPassword = async (req, res) => {
 
         res.json({ message: "Password reset successful." });
     } catch (error) {
-        console.error(error);
+        console.error("Reset password error:", error);
         res.status(500).json({ message: "Internal server error" });
     }
 };
 
-export const refreshToken = async (req, res) => {
-
+const refreshToken = async (req, res) => {
     const token = req.cookies.refreshToken;
-  
+
     if (!token) {
-      return res.status(401).json({ message: "No refresh token" });
+        return res.status(401).json({ message: "No refresh token" });
     }
-  
+
     try {
-  
-      const decoded = jwt.verify(
-        token,
-        process.env.JWT_REFRESH_SECRET
-      );
-  
-      const user = await User.findById(decoded.id);
-  
-      if (!user) {
-        return res.status(401).json({ message: "User not found" });
-      }
-  
-      const tokenIndex = user.refreshTokens.findIndex(
-        (t) => t.token === token
-      );
-  
-      if (tokenIndex === -1) {
-        return res.status(401).json({
-          message: "Refresh token not recognized"
+        const decoded = jwt.verify(token, JWT_REFRESH_SECRET);
+
+        const user = await User.findById(decoded.id).select("+refreshTokens");
+
+        if (!user) {
+            return res.status(401).json({ message: "User not found" });
+        }
+
+        const tokenIndex = (user.refreshTokens || []).findIndex(
+            t => t && t.token === token
+        );
+
+        if (tokenIndex === -1) {
+            return res.status(401).json({
+                message: "Refresh token not recognized"
+            });
+        }
+
+        user.refreshTokens.splice(tokenIndex, 1);
+
+        const newAccessToken = generateAccessToken(user);
+        const newRefreshToken = generateRefreshToken(user);
+
+        user.refreshTokens.push({ token: newRefreshToken });
+
+        await user.save();
+
+        res.cookie("refreshToken", newRefreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000
         });
-      }
-  
-      user.refreshTokens.splice(tokenIndex, 1);
-  
-      const newAccessToken = generateAccessToken(user);
-      const newRefreshToken = generateRefreshToken(user);
-  
-      user.refreshTokens.push({ token: newRefreshToken });
-  
-      await user.save();
-  
-      res.cookie("refreshToken", newRefreshToken, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "strict"
-      });
-  
-      res.json({
-        accessToken: newAccessToken
-      });
-  
+
+        res.json({
+            accessToken: newAccessToken
+        });
     } catch (error) {
-  
-      return res.status(401).json({
-        message: "Invalid refresh token"
-      });
-  
+        console.error("Refresh token error:", error);
+        return res.status(401).json({
+            message: "Invalid refresh token"
+        });
     }
-  
-  };
+};
 
 const logout = async (req, res) => {
     const token = req.cookies.refreshToken;
@@ -272,13 +288,11 @@ const logout = async (req, res) => {
     if (token) {
         try {
             const decoded = jwt.verify(token, JWT_REFRESH_SECRET);
-
-            const user = await User.findById(decoded.id);
+            const user = await User.findById(decoded.id).select("+refreshTokens");
             if (user) {
                 user.refreshTokens = (user.refreshTokens || []).filter(
                     t => t.token !== token
                 );
-
                 await user.save();
             }
         } catch (error) {

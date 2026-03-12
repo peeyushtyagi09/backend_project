@@ -9,12 +9,13 @@ if (!JWT_ACCESS_SECRET || !JWT_REFRESH_SECRET) {
 }
 
 const generateAccessToken = (user) => {
-    if (!user || !user._id || !user.role) {
-        throw new Error("User object with _id and role is required for generating access token.");
+    if (!user || !user._id || !user.role || !user.tenantId) {
+        throw new Error("User object must have _id, role, and tenantId to generate an access token.");
     }
     return jwt.sign(
         {
             id: user._id.toString(),
+            tenantId: user.tenantId.toString(),
             role: user.role
         },
         JWT_ACCESS_SECRET,

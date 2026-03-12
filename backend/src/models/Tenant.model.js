@@ -6,10 +6,14 @@ const TenantSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
+    description: {
+        type: String,
+        trim: true,
+        default: ""
+    },
     ownerUser: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-        required: true
+        ref: "User", 
     },
     createdDate: {
         type: Date,

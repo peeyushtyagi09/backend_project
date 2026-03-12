@@ -90,7 +90,6 @@ const UserSchema = new mongoose.Schema(
     }
 );
 
-// Ensure email uniqueness at the Mongoose level and provide a clearer error
 UserSchema.post("save", function(error, doc, next) {
     if (error.name === "MongoServerError" && error.code === 11000 && error.keyPattern && error.keyPattern.email) {
         next(new Error("Email already exists"));
@@ -99,33 +98,24 @@ UserSchema.post("save", function(error, doc, next) {
     }
 });
 
-// Hash the password only if it was modified
-UserSchema.pre("save", async function (next) {
+UserSchema.pre("save", async function () {
     if (!this.isModified("password")) {
-        return next();
+        return;
     }
-    try {
-        const salt = await bcrypt.genSalt(SALT_ROUNDS);
-        this.password = await bcrypt.hash(this.password, salt);
-        next();
-    } catch (err) {
-        next(err);
-    }
+    const salt = await bcrypt.genSalt(SALT_ROUNDS);
+    this.password = await bcrypt.hash(this.password, salt);
 });
 
-// Compare entered password to the hashed password
 UserSchema.methods.comparePassword = async function (candidatePassword) {
     if (typeof candidatePassword !== "string" || !candidatePassword) {
         throw new Error("No password entered.");
     }
-    // this.password will be undefined unless select: true is used on query
     if (!this.password) {
         throw new Error("Password hash not found on user document.");
     }
     return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// Utility method to remove sensitive fields from a user object
 UserSchema.methods.sanitize = function () {
     const obj = this.toObject();
     delete obj.password;
