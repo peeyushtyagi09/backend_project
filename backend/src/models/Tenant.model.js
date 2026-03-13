@@ -13,7 +13,12 @@ const TenantSchema = new mongoose.Schema({
     },
     ownerUser: {
         type: mongoose.Schema.Types.ObjectId,
+<<<<<<< HEAD
         ref: "User", 
+=======
+        ref: "User",
+        // Not required on first save — set after User is created in register flow
+>>>>>>> ba3d8e17aea35f57c428bac38be7aabc7cb46d80
     },
     createdDate: {
         type: Date,
