@@ -7,6 +7,7 @@ const { connectDB } = require("./src/database/db");
 
 // Routers
 const userRoutes = require("./src/routes/user.routes");
+const reconciliationRoutes = require("./src/routes/reconciliationRoutes");
 
 const app = express();
 
@@ -17,10 +18,16 @@ app.use(cors());
 app.use(cookieParser());
 
 // Connect to database
-connectDB();
+connectDB().then(() => {
+    console.log("Connected to the database");
+}).catch(err => {
+    console.error("Error connecting to the database:", err);
+    process.exit(1);
+});
 
 // API routes
 app.use("/api/auth", userRoutes);
+app.use("/api/reconciliation", reconciliationRoutes);
 
 app.get("/", (req, res) => {
     res.send("Hello World...");

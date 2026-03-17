@@ -98,10 +98,6 @@ UserSchema.post("save", function(error, doc, next) {
     }
 });
 
-<<<<<<< HEAD
-=======
-// Hash the password only if it was modified (use function with no "next" argument for mongoose 7+ support)
->>>>>>> ba3d8e17aea35f57c428bac38be7aabc7cb46d80
 UserSchema.pre("save", async function () {
     if (!this.isModified("password")) {
         return;

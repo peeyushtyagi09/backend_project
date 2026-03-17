@@ -30,7 +30,7 @@ const register = async (req, res) => {
 
         const userEmail = email.toLowerCase().trim();
         const existingUser = await User.findOne({ email: userEmail });
-        if (existingUser)
+        if (existingUser) {
             return res.status(400).json({ message: "User already exists" });
         }
 
@@ -41,7 +41,7 @@ const register = async (req, res) => {
             email: userEmail,
             password,
             verificationToken: verificationTokenHash,
-            verificationTokenExpires: Date.now() + 60 * 60 * 1000
+            verificationTokenExpires: Date.now() + 60 * 60 * 1000 // 1 hour
         });
 
         const verifyUrl = `${Frontend_url}/api/auth/verify-email?token=${verificationToken}`;
@@ -129,7 +129,7 @@ const login = async (req, res) => {
         user.refreshTokens.push({ token: refreshTokenValue });
         await user.save();
 
-        res.cookie("refreshToken", refreshToken, {
+        res.cookie("refreshToken", refreshTokenValue, {
             httpOnly: true,
             secure: process.env.NODE_ENV === "production",
             sameSite: "strict",
@@ -219,56 +219,50 @@ const resetPassword = async (req, res) => {
     }
 };
 
-export const refreshToken = async (req, res) => {
-
+const refreshToken = async (req, res) => {
     const token = req.cookies.refreshToken;
-
     if (!token) {
         return res.status(401).json({ message: "No refresh token" });
     }
 
     try {
-  
-      const decoded = jwt.verify(
-        token,
-        process.env.JWT_REFRESH_SECRET
-      );
-  
-      const user = await User.findById(decoded.id);
-  
-      if (!user) {
-        return res.status(401).json({ message: "User not found" });
-      }
-  
-      const tokenIndex = user.refreshTokens.findIndex(
-        (t) => t.token === token
-      );
-  
-      if (tokenIndex === -1) {
-        return res.status(401).json({
-          message: "Refresh token not recognized"
+        const decoded = jwt.verify(token, JWT_REFRESH_SECRET);
+
+        const user = await User.findById(decoded.id);
+        if (!user) {
+            return res.status(401).json({ message: "User not found" });
+        }
+
+        const tokenIndex = (user.refreshTokens || []).findIndex(
+            (t) => t.token === token
+        );
+
+        if (tokenIndex === -1) {
+            return res.status(401).json({
+                message: "Refresh token not recognized"
+            });
+        }
+
+        user.refreshTokens.splice(tokenIndex, 1);
+
+        const newAccessToken = generateAccessToken(user);
+        const newRefreshToken = generateRefreshToken(user);
+
+        user.refreshTokens.push({ token: newRefreshToken });
+
+        await user.save();
+
+        res.cookie("refreshToken", newRefreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000 // 1 week
         });
-      }
-  
-      user.refreshTokens.splice(tokenIndex, 1);
-  
-      const newAccessToken = generateAccessToken(user);
-      const newRefreshToken = generateRefreshToken(user);
-  
-      user.refreshTokens.push({ token: newRefreshToken });
-  
-      await user.save();
-  
-      res.cookie("refreshToken", newRefreshToken, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "strict"
-      });
-  
-      res.json({
-        accessToken: newAccessToken
-      });
-  
+
+        res.json({
+            accessToken: newAccessToken
+        });
+
     } catch (error) {
         console.error("Refresh token error:", error);
         return res.status(401).json({
