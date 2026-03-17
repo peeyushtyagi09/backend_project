@@ -29,20 +29,59 @@ const register = async (req, res) => {
         const { name, email, password, companyName, description, planType } = req.body;
 
         const userEmail = email.toLowerCase().trim();
+
+        // Check if user exists
         const existingUser = await User.findOne({ email: userEmail });
         if (existingUser) {
             return res.status(400).json({ message: "User already exists" });
         }
 
+        // 1. Create Tenant (required for user.tenantId)
+        let tenant;
+        try {
+            tenant = await Tenant.create({
+                companyName,
+                description,
+                planType
+            });
+        } catch (tenantError) {
+            console.error("Tenant creation error:", tenantError);
+            return res.status(500).json({ message: "Error creating tenant" });
+        }
+
+        if (!tenant || !tenant._id) {
+            return res.status(500).json({ message: "Could not create tenant" });
+        }
+
+        // 2. Create verification Token
         const verificationToken = crypto.randomBytes(32).toString("hex");
         const verificationTokenHash = hashToken(verificationToken);
 
-        const user = await User.create({
-            email: userEmail,
-            password,
-            verificationToken: verificationTokenHash,
-            verificationTokenExpires: Date.now() + 60 * 60 * 1000 // 1 hour
-        });
+        // 3. Create the User with tenantId
+        let user;
+        try {
+            user = await User.create({
+                name,
+                email: userEmail,
+                password,
+                tenantId: tenant._id,
+                verificationToken: verificationTokenHash,
+                verificationTokenExpires: Date.now() + 60 * 60 * 1000 // 1 hour
+            });
+
+            // Optional: Set the ownerUser field of the tenant to the user's _id
+            tenant.ownerUser = user._id;
+            await tenant.save();
+        } catch (userError) {
+            console.error("User creation error:", userError);
+            // Clean up: Remove tenant if user creation fails.
+            try {
+                await Tenant.findByIdAndDelete(tenant._id);
+            } catch (cleanupErr) {
+                // ignore
+            }
+            return res.status(500).json({ message: "Error creating user" });
+        }
 
         const verifyUrl = `${Frontend_url}/api/auth/verify-email?token=${verificationToken}`;
         await sendEmail(
