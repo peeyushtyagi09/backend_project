@@ -56,3 +56,7 @@ Desktop.ini
 # Optional: Testing output
 test-output/
 junit-report.xml
+
+# files
+uploads/
+src/uploads/
