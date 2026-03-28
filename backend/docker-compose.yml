@@ -1,13 +1,21 @@
-version: "3.9"
+version: "3.8"
 
-services: 
-  api:
-    build: . 
-    container_name: api 
-    ports: 
+services:
+  backend:
+    build: .
+    container_name: reconcile_backend
+    ports:
       - "5000:5000"
-    depends_on: 
-      - mongo 
+    env_file:
+      - .env
+    depends_on:
       - redis
-    environment: 
-      
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+  redis:
+    image: redis:7
+    container_name: reconcile_redis
+    ports:
+      - "6379:6379"
