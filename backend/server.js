@@ -30,7 +30,7 @@ app.use("/api/auth", userRoutes);
 app.use("/api/reconciliation", reconciliationRoutes);
 
 app.get("/", (req, res) => {
-    res.send("Hello World...");
+    res.send("He World...");
 });
 
 const PORT = process.env.PORT || 5000;

@@ -3,7 +3,7 @@ version: "3.8"
 services:
   backend:
     build: .
-    container_name: reconcile_backend
+    container_name: reconcile_backend 
     ports:
       - "5000:5000"
     env_file:
@@ -13,6 +13,19 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
+    
+  worker: 
+      build: . 
+      container_name: reconcile_worker
+      command: node src/workers/reconciliationWorker.js
+      depends_on: 
+        - redis
+        - backend
+      env_file:
+        - .env
+      volumes: 
+        - .:/app 
+        - /app/node_modules
 
   redis:
     image: redis:7

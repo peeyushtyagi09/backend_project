@@ -1,8 +1,9 @@
-const { Queue } = require("bullmq");
+const IORedis = require("ioredis");
 
-const connection = {
+const connection = new IORedis({
     host: "redis", 
-    port: 6379
-};
+    port: 6379,
+    maxRetriesPerRequest: null
+});
 
-module.exports = { connection };
+module.exports = connection;

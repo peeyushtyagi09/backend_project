@@ -1,5 +1,6 @@
 const UploadedFile = require("../models/UploadedFile");
 const ReconciliationBatch = require("../models/ReconciliationBatch");
+const reconciliationQueue = require("../queues/reconciliationQueue");
 
 exports.uploadReconciliationFiles = async (req, res) => {
 
@@ -56,7 +57,11 @@ exports.uploadReconciliationFiles = async (req, res) => {
       status: "pending"
     });
 
-    
+    // adding job afetr batch is created
+    await reconciliationQueue.add("processReconciliation", {
+        batchId: batch._id
+    });
+    console.log("Job added for batch:", batch._id);
 
     res.status(201).json({
       message: "Files uploaded successfully",
