@@ -7,7 +7,7 @@ const parseCSV = (filePath) => {
 
         fs.createReadStream(filePath)
             .pipe(csv())
-            .on("data", (data) => result.push(data))
+            .on("data", (data) => results.push(data))
             .on("end", () => resolve(results))
             .on("error", (err) => reject(err))
     });

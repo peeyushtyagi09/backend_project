@@ -1,63 +1,135 @@
 require("dotenv").config();
+
 const { Worker } = require("bullmq");
 const connection = require("../config/redis");
-const ReconciliationBatch = require("../models/ReconciliationBatch");
-const { connectDB } = require("../database/db"); 
 
+const ReconciliationBatch = require("../models/ReconciliationBatch");
+const UploadedFile = require("../models/UploadedFile");
+
+const parseCSV = require("../utils/parseCSV"); // Step 3 utility
+
+const { connectDB } = require("../database/db");
+
+// Connect DB
 (async () => {
-    try {
-        await connectDB();
-    } catch (err) {
-        console.error("Failed to connect to database:", err);
-        process.exit(1);
-    }
+  try {
+    await connectDB();
+  } catch (err) {
+    console.error("Failed to connect to database:", err);
+    process.exit(1);
+  }
 })();
 
 const worker = new Worker(
-    "reconciliationQueue",
-    async (job) => {
-        const { batchId } = job.data || {};
-        if (!batchId) {
-            console.error("Job data missing batchId");
-            throw new Error("Missing batchId in job data");
+  "reconciliationQueue",
+  async (job) => {
+    const { batchId } = job.data || {};
+
+    if (!batchId) {
+      console.error("Job data missing batchId");
+      throw new Error("Missing batchId in job data");
+    }
+
+    console.log(`Processing batch: ${batchId}`);
+
+    let batch;
+
+    try {
+      // 🟢 Step 1: Set batch to processing
+      batch = await ReconciliationBatch.findByIdAndUpdate(
+        batchId,
+        { status: "processing", error: undefined },
+        { returnDocument: "after" }
+      );
+
+      if (!batch) {
+        throw new Error(`Batch with id ${batchId} not found`);
+      }
+
+      console.log(`Batch ${batchId} set to 'processing'`);
+
+      // 🟢 Step 2: Fetch uploaded files
+      const ordersFile = await UploadedFile.findById(batch.ordersFileId);
+      console.log("order", ordersFile);
+      const paymentsFile = await UploadedFile.findById(batch.paymentsFileId);
+      console.log("payments", paymentsFile)
+
+      if (!ordersFile || !paymentsFile) {
+        throw new Error("Required files not found");
+      }
+
+      console.log("Files fetched successfully");
+
+      // 🟢 Step 3: Parse CSV files
+      const orders = await parseCSV(ordersFile.storedPath);
+      const payments = await parseCSV(paymentsFile.storedPath);
+
+      console.log("Orders parsed:", orders.length);
+      console.log("Payments parsed:", payments.length);
+
+      // 🟢 Step 4: Create payment map
+      const paymentMap = new Map();
+
+      payments.forEach((payment) => {
+        paymentMap.set(payment.orderId, payment);
+      });
+
+      // 🟢 Step 5: Matching logic
+      let matched = 0;
+      let missing = 0;
+      let mismatched = 0;
+
+      orders.forEach((order) => {
+        const payment = paymentMap.get(order.orderId);
+
+        if (!payment) {
+          missing++;
+        } else if (Number(payment.amount) === Number(order.amount)) {
+          matched++;
+        } else {
+          mismatched++;
         }
+      });
 
-        console.log(`Processing batch: ${batchId}`);
+      // 🟢 Step 6: Generate result
+      const result = {
+        totalOrders: orders.length,
+        totalPayments: payments.length,
+        matched,
+        missing,
+        mismatched,
+      };
 
-        let batch;
-        try {
-            batch = await ReconciliationBatch.findByIdAndUpdate(
-                batchId,
-                { status: "processing", error: undefined },
-                { new: true }
-            );
-            if (!batch) {
-                throw new Error(`Batch with id ${batchId} not found`);
-            }
-            console.log(`Batch ${batchId} set to 'processing'`);
+      console.log("Result:", result);
 
-            // Simulate processing delay
-            await new Promise(resolve => setTimeout(resolve, 3000));
+      // 🟢 Step 7: Save result
+      await ReconciliationBatch.findByIdAndUpdate(
+        batchId,
+        {
+          status: "completed",
+          result,
+          error: undefined,
+        },
+        { returnDocument: "after" }
+      );
 
-            await ReconciliationBatch.findByIdAndUpdate(batchId, {
-                status: "completed",
-                error: undefined
-            });
-            console.log(`Batch ${batchId} set to 'completed'`);
-            console.log("Completed batch:", batchId);
-        } catch (error) {
-            console.error("Failed to process batch:", error);
-            // Mark batch as failed only if this was a batch that reached processing step
-            if (batchId) {
-                await ReconciliationBatch.findByIdAndUpdate(batchId, {
-                    status: "failed",
-                    error: error.message
-                });
-            }
-            throw error; // rethrow to let BullMQ handle (for retries, etc.)
-        }
-    },
-    { connection }
+      console.log(`Batch ${batchId} set to 'completed'`);
+      console.log("Completed batch:", batchId);
+
+    } catch (error) {
+      console.error("Failed to process batch:", error);
+
+      if (batchId) {
+        await ReconciliationBatch.findByIdAndUpdate(batchId, {
+          status: "failed",
+          error: error.message,
+        });
+      }
+
+      throw error;
+    }
+  },
+  { connection }
 );
 
 module.exports = worker;

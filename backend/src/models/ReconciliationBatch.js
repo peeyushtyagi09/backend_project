@@ -6,7 +6,7 @@ const reconciliationBatchSchema = new mongoose.Schema({
         ref: "Tenant",
         required: true
     },
-    orderFileId: {
+    ordersFileId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "UploadedFile",
     },
