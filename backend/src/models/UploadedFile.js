@@ -26,7 +26,10 @@ const uploadedFileSchema = new mongoose.Schema({
   fileSize: {
     type: Number
   },
-
+  fileHash: {
+    type: String,
+    required: true
+  },
   uploadedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User"

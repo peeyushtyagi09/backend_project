@@ -1,4 +1,5 @@
 const UploadedFile = require("../models/UploadedFile");
+const generateFileHash = require("../utils/generateFileHash");
 const ReconciliationBatch = require("../models/ReconciliationBatch");
 const reconciliationQueue = require("../queues/reconciliationQueue");
 
@@ -16,6 +17,45 @@ exports.uploadReconciliationFiles = async (req, res) => {
         message: "All three files are required"
       });
     }
+ 
+
+    // Generate file hashes first
+    const ordersHash = await generateFileHash(files.ordersFile[0].path);
+    const paymentsHash = await generateFileHash(files.paymentsFile[0].path);
+    const bankHash = await generateFileHash(files.bankFile[0].path);
+
+    // Check for duplicate orders file
+    let existingFile = await UploadedFile.findOne({
+      fileHash: ordersHash,
+      tenantId
+    });
+    if (existingFile) {
+      return res.status(400).json({
+        message: "Duplicate file uploaded"
+      });
+    }
+
+    // Check for duplicate payments file
+    existingFile = await UploadedFile.findOne({
+      fileHash: paymentsHash,
+      tenantId
+    });
+    if (existingFile) {
+      return res.status(400).json({
+        message: "Duplicate file uploaded"
+      });
+    }
+
+    // Check for duplicate bank file
+    existingFile = await UploadedFile.findOne({
+      fileHash: bankHash,
+      tenantId
+    });
+    if (existingFile) {
+      return res.status(400).json({
+        message: "Duplicate file uploaded"
+      });
+    }
 
     // Create UploadedFile records
 
@@ -25,6 +65,7 @@ exports.uploadReconciliationFiles = async (req, res) => {
       originalName: files.ordersFile[0].originalname,
       storedPath: files.ordersFile[0].path,
       fileSize: files.ordersFile[0].size,
+      fileHash: ordersHash,
       uploadedBy: userId
     });
 
@@ -34,6 +75,7 @@ exports.uploadReconciliationFiles = async (req, res) => {
       originalName: files.paymentsFile[0].originalname,
       storedPath: files.paymentsFile[0].path,
       fileSize: files.paymentsFile[0].size,
+      fileHash: paymentsHash,
       uploadedBy: userId
     });
 
@@ -43,6 +85,7 @@ exports.uploadReconciliationFiles = async (req, res) => {
       originalName: files.bankFile[0].originalname,
       storedPath: files.bankFile[0].path,
       fileSize: files.bankFile[0].size,
+      fileHash: bankHash,
       uploadedBy: userId
     });
 
@@ -57,9 +100,9 @@ exports.uploadReconciliationFiles = async (req, res) => {
       status: "pending"
     });
 
-    // adding job afetr batch is created
+    // adding job after batch is created
     await reconciliationQueue.add("processReconciliation", {
-        batchId: batch._id
+      batchId: batch._id
     });
     console.log("Job added for batch:", batch._id);
 
