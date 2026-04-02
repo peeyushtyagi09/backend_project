@@ -35,15 +35,22 @@ const worker = new Worker(
     let batch;
 
     try {
-      // 🟢 Step 1: Set batch to processing
-      batch = await ReconciliationBatch.findByIdAndUpdate(
-        batchId,
-        { status: "processing", error: undefined },
+      // 🟢 STEP 2 — Improve Processing Lock by updating status ONLY if pending
+      batch = await ReconciliationBatch.findOneAndUpdate(
+        {
+          _id: batchId,
+          status: "pending",
+        },
+        {
+          status: "processing",
+          error: undefined,
+        },
         { returnDocument: "after" }
       );
 
       if (!batch) {
-        throw new Error(`Batch with id ${batchId} not found`);
+        console.log(`Batch ${batchId} already processed or in progress`);
+        return;
       }
 
       console.log(`Batch ${batchId} set to 'processing'`);

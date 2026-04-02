@@ -17,7 +17,6 @@ exports.uploadReconciliationFiles = async (req, res) => {
         message: "All three files are required"
       });
     }
- 
 
     // Generate file hashes first
     const ordersHash = await generateFileHash(files.ordersFile[0].path);
@@ -100,10 +99,14 @@ exports.uploadReconciliationFiles = async (req, res) => {
       status: "pending"
     });
 
-    // adding job after batch is created
-    await reconciliationQueue.add("processReconciliation", {
-      batchId: batch._id
-    });
+    // adding job after batch is created, making job unique with jobId=batchId
+    await reconciliationQueue.add(
+      "processReconciliation",
+      { batchId: batch._id },
+      {
+        jobId: batch._id.toString()
+      }
+    );
     console.log("Job added for batch:", batch._id);
 
     res.status(201).json({
