@@ -10,6 +10,6 @@ const generateFileHash = async (filePath) => {
         stream.on("end", () => resolve(hash.digest("hex")));
         stream.on("error", (err) => reject(err));
     });
-}/mjlu7.;
+};
 
 module.exports = generateFileHash;
