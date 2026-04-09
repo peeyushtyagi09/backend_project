@@ -3,10 +3,11 @@ require("dotenv").config();
 const { Worker } = require("bullmq");
 const connection = require("../config/redis");
 
+const MatchingRule = require("../models/MatchingRule");
 const ReconciliationBatch = require("../models/ReconciliationBatch");
 const UploadedFile = require("../models/UploadedFile");
 
-const parseCSV = require("../utils/parseCSV"); // Step 3 utility
+const parseCSV = require("../utils/parseCSV");
 
 const { connectDB } = require("../database/db");
 
@@ -26,25 +27,16 @@ const worker = new Worker(
     const { batchId } = job.data || {};
 
     if (!batchId) {
-      console.error("Job data missing batchId");
       throw new Error("Missing batchId in job data");
     }
 
     console.log(`Processing batch: ${batchId}`);
 
-    let batch;
-
     try {
-      // 🟢 STEP 2 — Improve Processing Lock by updating status ONLY if pending
-      batch = await ReconciliationBatch.findOneAndUpdate(
-        {
-          _id: batchId,
-          status: "pending",
-        },
-        {
-          status: "processing",
-          error: undefined,
-        },
+      // 🟢 STEP 1 — Idempotent lock (only process pending)
+      const batch = await ReconciliationBatch.findOneAndUpdate(
+        { _id: batchId, status: "pending" },
+        { status: "processing", error: undefined },
         { returnDocument: "after" }
       );
 
@@ -55,11 +47,20 @@ const worker = new Worker(
 
       console.log(`Batch ${batchId} set to 'processing'`);
 
-      // 🟢 Step 2: Fetch uploaded files
+      // 🟢 STEP 2 — Fetch tenant rule
+      const tenantId = batch.tenantId;
+
+      const rule = await MatchingRule.findOne({ tenantId });
+
+      if (!rule) {
+        throw new Error("Matching rule not found for tenant");
+      }
+
+      console.log("Using rule:", rule);
+
+      // 🟢 STEP 3 — Fetch files
       const ordersFile = await UploadedFile.findById(batch.ordersFileId);
-      console.log("order", ordersFile);
       const paymentsFile = await UploadedFile.findById(batch.paymentsFileId);
-      console.log("payments", paymentsFile)
 
       if (!ordersFile || !paymentsFile) {
         throw new Error("Required files not found");
@@ -67,49 +68,63 @@ const worker = new Worker(
 
       console.log("Files fetched successfully");
 
-      // 🟢 Step 3: Parse CSV files
+      // 🟢 STEP 4 — Parse CSV
       const orders = await parseCSV(ordersFile.storedPath);
       const payments = await parseCSV(paymentsFile.storedPath);
 
       console.log("Orders parsed:", orders.length);
       console.log("Payments parsed:", payments.length);
 
-      // 🟢 Step 4: Create payment map
+      // 🟢 STEP 5 — Build payment map
       const paymentMap = new Map();
 
       payments.forEach((payment) => {
         paymentMap.set(payment.orderId, payment);
       });
 
-      // 🟢 Step 5: Matching logic
+      // 🟢 STEP 6 — Apply rule-based matching
       let matched = 0;
       let missing = 0;
       let mismatched = 0;
+
+      const tolerance = rule.amountTolerance || 0;
 
       orders.forEach((order) => {
         const payment = paymentMap.get(order.orderId);
 
         if (!payment) {
           missing++;
-        } else if (Number(payment.amount) === Number(order.amount)) {
-          matched++;
         } else {
-          mismatched++;
+          const orderAmount = Number(order.amount);
+          const paymentAmount = Number(payment.amount);
+
+          const diff = Math.abs(orderAmount - paymentAmount);
+          const allowed = orderAmount * tolerance;
+
+          if (diff <= allowed) {
+            matched++;
+          } else {
+            mismatched++;
+          }
         }
       });
 
-      // 🟢 Step 6: Generate result
+      // 🟢 STEP 7 — Generate result
       const result = {
         totalOrders: orders.length,
         totalPayments: payments.length,
         matched,
         missing,
         mismatched,
+        ruleUsed: {
+          tolerance: rule.amountTolerance,
+          matchFields: rule.matchFields,
+        },
       };
 
       console.log("Result:", result);
 
-      // 🟢 Step 7: Save result
+      // 🟢 STEP 8 — Save result
       await ReconciliationBatch.findByIdAndUpdate(
         batchId,
         {
@@ -121,17 +136,14 @@ const worker = new Worker(
       );
 
       console.log(`Batch ${batchId} set to 'completed'`);
-      console.log("Completed batch:", batchId);
 
     } catch (error) {
       console.error("Failed to process batch:", error);
 
-      if (batchId) {
-        await ReconciliationBatch.findByIdAndUpdate(batchId, {
-          status: "failed",
-          error: error.message,
-        });
-      }
+      await ReconciliationBatch.findByIdAndUpdate(batchId, {
+        status: "failed",
+        error: error.message,
+      });
 
       throw error;
     }
